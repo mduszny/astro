@@ -1,0 +1,456 @@
+import tkinter as tk
+from tkinter import ttk, messagebox
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+
+
+class CelestialSphereApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Sfera Niebieska 2D - Astronawigacja")
+        self.root.geometry("1100x750")
+
+        style = ttk.Style()
+        style.configure("TLabel", font=("Arial", 10))
+        style.configure("TRadiobutton", font=("Arial", 10))
+        style.configure("TButton", font=("Arial", 10, "bold"))
+
+        self.mode_var = tk.IntVar(value=1)
+
+        self._build_ui()
+        self._build_plot()
+
+        self.oblicz_i_rysuj()
+
+    def _build_ui(self):
+        self.frame_controls = ttk.Frame(self.root, padding="20")
+        self.frame_controls.pack(side=tk.LEFT, fill=tk.Y)
+
+        ttk.Label(self.frame_controls, text="Parametry Wejściowe", font=("Arial", 12, "bold")).pack(pady=(0, 20),
+                                                                                                    anchor=tk.W)
+
+        ttk.Label(self.frame_controls, text="Tryb Obliczeń:", font=("Arial", 10, "bold")).pack(anchor=tk.W, pady=(0, 5))
+
+        ttk.Radiobutton(self.frame_controls, text="1. Fi, Dec, LHA → A, h (Obecny)",
+                        variable=self.mode_var, value=1, command=self.switch_mode).pack(anchor=tk.W, padx=5)
+
+        ttk.Radiobutton(self.frame_controls, text="2. Fi, Azymut, Wysokość → LHA, Dec",
+                        variable=self.mode_var, value=2, command=self.switch_mode).pack(anchor=tk.W, padx=5,
+                                                                                        pady=(0, 15))
+
+        ttk.Separator(self.frame_controls, orient='horizontal').pack(fill='x', pady=(0, 15))
+
+        # 1. Szerokość Geograficzna (φ)
+        ttk.Label(self.frame_controls, text="Szerokość Geograficzna (φ):").pack(anchor=tk.W)
+        frame_fi = ttk.Frame(self.frame_controls)
+        frame_fi.pack(fill=tk.X, pady=(0, 12))
+
+        self.entry_fi_deg = ttk.Entry(frame_fi, width=6)
+        self.entry_fi_deg.insert(0, "54")
+        self.entry_fi_deg.pack(side=tk.LEFT)
+        self.entry_fi_deg.bind("<KeyRelease>", self.update_combo_signs)
+        ttk.Label(frame_fi, text="°").pack(side=tk.LEFT, padx=(0, 5))
+
+        self.entry_fi_min = ttk.Entry(frame_fi, width=6)
+        self.entry_fi_min.insert(0, "30.0")
+        self.entry_fi_min.pack(side=tk.LEFT)
+        self.entry_fi_min.bind("<KeyRelease>", self.update_combo_signs)
+        ttk.Label(frame_fi, text="'").pack(side=tk.LEFT, padx=(0, 5))
+
+        self.combo_fi = ttk.Combobox(frame_fi, values=["N", "S", "-"], width=3, state="readonly")
+        self.combo_fi.set("N")
+        self.combo_fi.pack(side=tk.LEFT)
+
+        # 2. Wejście 1 (Deklinacja LUB Azymut)
+        self.lbl_in1 = ttk.Label(self.frame_controls, text="Deklinacja (δ):")
+        self.lbl_in1.pack(anchor=tk.W)
+        frame_in1 = ttk.Frame(self.frame_controls)
+        frame_in1.pack(fill=tk.X, pady=(0, 12))
+
+        self.entry_in1_deg = ttk.Entry(frame_in1, width=6)
+        self.entry_in1_deg.insert(0, "20")
+        self.entry_in1_deg.pack(side=tk.LEFT)
+        self.entry_in1_deg.bind("<KeyRelease>", self.update_combo_signs)
+        ttk.Label(frame_in1, text="°").pack(side=tk.LEFT, padx=(0, 5))
+
+        self.entry_in1_min = ttk.Entry(frame_in1, width=6)
+        self.entry_in1_min.insert(0, "0.0")
+        self.entry_in1_min.pack(side=tk.LEFT)
+        self.entry_in1_min.bind("<KeyRelease>", self.update_combo_signs)
+        ttk.Label(frame_in1, text="'").pack(side=tk.LEFT, padx=(0, 5))
+
+        self.combo_in1_sign = ttk.Combobox(frame_in1, values=["N", "S", "-"], width=3, state="readonly")
+        self.combo_in1_sign.set("N")
+        self.combo_in1_sign.pack(side=tk.LEFT)
+
+        # 3. Wejście 2 (LHA LUB Wysokość)
+        self.lbl_in2 = ttk.Label(self.frame_controls, text="LHA (0-360):")
+        self.lbl_in2.pack(anchor=tk.W)
+        frame_in2 = ttk.Frame(self.frame_controls)
+        frame_in2.pack(fill=tk.X, pady=(0, 25))
+
+        self.entry_in2_deg = ttk.Entry(frame_in2, width=6)
+        self.entry_in2_deg.insert(0, "45")
+        self.entry_in2_deg.pack(side=tk.LEFT)
+        ttk.Label(frame_in2, text="°").pack(side=tk.LEFT, padx=(0, 5))
+
+        self.entry_in2_min = ttk.Entry(frame_in2, width=6)
+        self.entry_in2_min.insert(0, "0.0")
+        self.entry_in2_min.pack(side=tk.LEFT)
+        ttk.Label(frame_in2, text="'").pack(side=tk.LEFT, padx=(0, 5))
+
+        # Przycisk
+        btn_rysuj = ttk.Button(self.frame_controls, text="Rysuj Sferę", command=self.oblicz_i_rysuj)
+        btn_rysuj.pack(fill=tk.X, pady=5)
+
+        # Opis
+        opis = """Rzut sferyczny -> Geometria Cyrkla
+- Pierwotna macierz rzutowania.
+- Równik (fiolet) JEST rygorystycznie
+  prostopadły do osi Pn-Ps.
+- Azymut poprawnie kreślony od
+  geometrycznie bliższego bieguna (N/S).
+"""
+        ttk.Label(self.frame_controls, text=opis, justify=tk.LEFT, foreground="#555", wraplength=220).pack(pady=25,
+                                                                                                           anchor=tk.W)
+
+    def _build_plot(self):
+        self.frame_plot = ttk.Frame(self.root)
+        self.frame_plot.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+
+        self.fig = plt.figure(figsize=(7, 7), dpi=100)
+        self.ax = self.fig.add_subplot(111)
+
+        self.canvas = FigureCanvasTkAgg(self.fig, master=self.frame_plot)
+        self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+    @staticmethod
+    def get_circle_arc(p1, p2, p3, num=200):
+        """Funkcja generująca łuk koła przez 3 punkty."""
+        det = (p1[0] - p2[0]) * (p2[1] - p3[1]) - (p2[0] - p3[0]) * (p1[1] - p2[1])
+        if abs(det) < 1e-6:
+            return np.linspace(p1[0], p3[0], num), np.linspace(p1[1], p3[1], num)
+
+        temp1 = p1[0] * 2 + p1[1] * 2
+        temp2 = p2[0] * 2 + p2[1] * 2
+        temp3 = p3[0] * 2 + p3[1] * 2
+
+        bc = (temp1 - temp2) / 2
+        cd = (temp2 - temp3) / 2
+
+        cx = (bc * (p2[1] - p3[1]) - cd * (p1[1] - p2[1])) / det
+        cy = ((p1[0] - p2[0]) * cd - (p2[0] - p3[0]) * bc) / det
+        r = np.hypot(p1[0] - cx, p1[1] - cy)
+
+        a1 = np.arctan2(p1[1] - cy, p1[0] - cx)
+        a3 = np.arctan2(p3[1] - cy, p3[0] - cx)
+        a2 = np.arctan2(p2[1] - cy, p2[0] - cx)
+
+        cross = (p1[0] - cx) * (p2[1] - cy) - (p1[1] - cy) * (p2[0] - cx)
+        if cross > 0:
+            while a3 < a1: a3 += 2 * np.pi
+            while a2 < a1: a2 += 2 * np.pi
+            if a2 > a3: a3 += 2 * np.pi
+            angles = np.linspace(a1, a3, num)
+        else:
+            while a3 > a1: a3 -= 2 * np.pi
+            while a2 > a1: a2 -= 2 * np.pi
+            if a2 < a3: a3 -= 2 * np.pi
+            angles = np.linspace(a1, a3, num)
+
+        return cx + r * np.cos(angles), cy + r * np.sin(angles)
+
+    def update_combo_signs(self, event=None):
+        try:
+            fi_val = abs(float(self.entry_fi_deg.get().replace(',', '.'))) + abs(
+                float(self.entry_fi_min.get().replace(',', '.')))
+            if fi_val == 0.0:
+                self.combo_fi.set("-")
+            elif self.combo_fi.get() == "-":
+                self.combo_fi.set("N")
+        except ValueError:
+            pass
+
+        if self.mode_var.get() == 1:
+            try:
+                dec_val = abs(float(self.entry_in1_deg.get().replace(',', '.'))) + abs(
+                    float(self.entry_in1_min.get().replace(',', '.')))
+                if dec_val == 0.0:
+                    self.combo_in1_sign.set("-")
+                elif self.combo_in1_sign.get() == "-":
+                    self.combo_in1_sign.set("N")
+            except ValueError:
+                pass
+
+    def switch_mode(self):
+        mode = self.mode_var.get()
+
+        self.entry_in1_deg.delete(0, tk.END)
+        self.entry_in1_min.delete(0, tk.END)
+        self.entry_in2_deg.delete(0, tk.END)
+        self.entry_in2_min.delete(0, tk.END)
+
+        if mode == 1:
+            self.lbl_in1.config(text="Deklinacja (δ):")
+            self.entry_in1_deg.insert(0, "20")
+            self.entry_in1_min.insert(0, "0.0")
+            self.combo_in1_sign.pack(side=tk.LEFT)
+
+            self.lbl_in2.config(text="LHA (0-360):")
+            self.entry_in2_deg.insert(0, "45")
+            self.entry_in2_min.insert(0, "0.0")
+        else:
+            self.lbl_in1.config(text="Azymut Zn (0-360):")
+            self.entry_in1_deg.insert(0, "240")
+            self.entry_in1_min.insert(0, "0.0")
+            self.combo_in1_sign.pack_forget()
+
+            self.lbl_in2.config(text="Wysokość (h):")
+            self.entry_in2_deg.insert(0, "35")
+            self.entry_in2_min.insert(0, "0.0")
+
+    def oblicz_i_rysuj(self):
+        try:
+            fi_deg = abs(float(self.entry_fi_deg.get().replace(',', '.')))
+            fi_min = abs(float(self.entry_fi_min.get().replace(',', '.')))
+            fi_val = fi_deg + (fi_min / 60.0)
+            fi_val = np.clip(fi_val, 0.0, 90.0)
+
+            if fi_val == 0.0:
+                self.combo_fi.set("-")
+                fi_rad = 0.0
+            else:
+                if self.combo_fi.get() == "-": self.combo_fi.set("N")
+                fi_rad = np.radians(fi_val if self.combo_fi.get() == "N" else -fi_val)
+
+            mode = self.mode_var.get()
+            dec_rad, lha_rad, hc_rad, zn_rad = 0.0, 0.0, 0.0, 0.0
+
+            if mode == 1:
+                dec_deg = abs(float(self.entry_in1_deg.get().replace(',', '.')))
+                dec_min = abs(float(self.entry_in1_min.get().replace(',', '.')))
+                dec_val = dec_deg + (dec_min / 60.0)
+                dec_val = np.clip(dec_val, 0.0, 90.0)
+
+                if dec_val == 0.0:
+                    self.combo_in1_sign.set("-")
+                    dec_rad = 0.0
+                else:
+                    if self.combo_in1_sign.get() == "-": self.combo_in1_sign.set("N")
+                    dec_rad = np.radians(dec_val if self.combo_in1_sign.get() == "N" else -dec_val)
+
+                lha_deg = float(self.entry_in2_deg.get().replace(',', '.'))
+                lha_min = float(self.entry_in2_min.get().replace(',', '.'))
+                lha_total = lha_deg + (lha_min / 60.0)
+
+                if not (0 <= lha_total <= 360):
+                    messagebox.showwarning("Błąd", "LHA musi być w przedziale 0-360 stopni.")
+                    return
+                lha_rad = np.radians(lha_total)
+
+                sin_hc = np.sin(fi_rad) * np.sin(dec_rad) + np.cos(fi_rad) * np.cos(dec_rad) * np.cos(lha_rad)
+                hc_rad = np.arcsin(np.clip(sin_hc, -1.0, 1.0))
+
+                denom = np.cos(fi_rad) * np.cos(hc_rad)
+                denom = 1e-9 if abs(denom) < 1e-9 else denom
+                cos_zn = (np.sin(dec_rad) - np.sin(fi_rad) * sin_hc) / denom
+                cos_zn = np.clip(cos_zn, -1.0, 1.0)
+                zn_rad = np.arccos(cos_zn)
+
+                if np.sin(lha_rad) > 0:
+                    zn_rad = 2 * np.pi - zn_rad
+
+            else:
+                a_deg = float(self.entry_in1_deg.get().replace(',', '.'))
+                a_min = float(self.entry_in1_min.get().replace(',', '.'))
+                a_total = (a_deg + (a_min / 60.0)) % 360
+                zn_rad = np.radians(a_total)
+
+                h_deg = float(self.entry_in2_deg.get().replace(',', '.'))
+                h_min = float(self.entry_in2_min.get().replace(',', '.'))
+                sign_h = -1 if h_deg < 0 else 1
+                h_total = sign_h * (abs(h_deg) + (h_min / 60.0))
+
+                if not (-90 <= h_total <= 90):
+                    messagebox.showwarning("Błąd", "Wysokość musi być w przedziale -90 do +90 stopni.")
+                    return
+                hc_rad = np.radians(h_total)
+
+                sin_dec = np.sin(fi_rad) * np.sin(hc_rad) + np.cos(fi_rad) * np.cos(hc_rad) * np.cos(zn_rad)
+                dec_rad = np.arcsin(np.clip(sin_dec, -1.0, 1.0))
+
+                denom_lha = np.cos(fi_rad) * np.cos(dec_rad)
+                denom_lha = 1e-9 if abs(denom_lha) < 1e-9 else denom_lha
+                cos_lha = (np.sin(hc_rad) - np.sin(fi_rad) * sin_dec) / denom_lha
+
+                t_angle_rad = np.arccos(np.clip(cos_lha, -1.0, 1.0))
+
+                if np.sin(zn_rad) > 0:
+                    lha_rad = 2 * np.pi - t_angle_rad
+                else:
+                    lha_rad = t_angle_rad
+
+        except ValueError:
+            messagebox.showerror("Błąd", "Wprowadź poprawne wartości liczbowe.")
+            return
+
+        # =========================================================================
+        # RYSOWANIE SFERY - PIERWOTNA MATRYCA RZUTOWANIA
+        # =========================================================================
+        self.ax.clear()
+        self.ax.set_aspect('equal')
+        self.ax.axis('off')
+
+        lha_deg_final = np.degrees(lha_rad) % 360
+        is_west = lha_deg_final <= 180
+
+        # Przywrócono oryginalny kierunek orientacji
+        orient = 1 if is_west else -1
+        e_curve = 0.25
+
+        # Oryginalne równania X_s i Y_s
+        X_s = -orient * np.cos(hc_rad) * np.cos(zn_rad)
+        Y_s_3d = np.sin(hc_rad)
+        Z_s_3d = -orient * np.cos(hc_rad) * np.sin(zn_rad)
+        Y_s = Y_s_3d - Z_s_3d * e_curve
+
+        r_s = np.hypot(X_s, Y_s)
+        if r_s > 0.99:
+            X_s *= 0.99 / r_s
+            Y_s *= 0.99 / r_s
+
+        theta = np.linspace(0, 2 * np.pi, 200)
+        self.ax.plot(np.cos(theta), np.sin(theta), color='black', linewidth=1.5, zorder=1)
+
+        # Oryginalne rzutowanie elementów głównych sfery
+        x_hor, y_hor = self.get_circle_arc((-orient, 0), (0, -e_curve), (orient, 0))
+        self.ax.plot(x_hor, y_hor, 'blue', linewidth=1.2, zorder=2)
+
+        p_Rg = (orient * np.sin(fi_rad), np.cos(fi_rad))
+        p_Rd = (-orient * np.sin(fi_rad), -np.cos(fi_rad))
+        x_eq, y_eq = self.get_circle_arc(p_Rg, (0, -e_curve), p_Rd)
+        self.ax.plot(x_eq, y_eq, 'purple', linewidth=1.2, zorder=2)
+
+        x_vc, y_vc = self.get_circle_arc((0, 1), (X_s, Y_s), (0, -1))
+        self.ax.plot(x_vc, y_vc, 'darkorange', linewidth=1.5, zorder=3)
+
+        p_Pn = (-orient * np.cos(fi_rad), np.sin(fi_rad))
+        p_Ps = (orient * np.cos(fi_rad), -np.sin(fi_rad))
+        x_hc, y_hc = self.get_circle_arc(p_Pn, (X_s, Y_s), p_Ps)
+        self.ax.plot(x_hc, y_hc, 'green', linewidth=1.5, zorder=3)
+
+        # Obliczenia pod strzałki
+        cy_h = (1 - e_curve ** 2) / (2 * e_curve)
+        R_h = np.sqrt(cy_h ** 2 + 1)
+
+        if abs(X_s) < 1e-5:
+            X_Ah, Y_Ah = 0.0, -e_curve
+        else:
+            cx_v = (X_s * 2 + Y_s * 2 - 1) / (2 * X_s)
+            k = cy_h / cx_v
+            D = 4 * cy_h * 2 + 4 * (k * 2 + 1)
+            Y_Ah = (2 * cy_h - np.sqrt(D)) / (2 * (k ** 2 + 1))
+            X_Ah = k * Y_Ah
+
+        # =========================================================================
+        # LOGIKA STRZAŁKI AZYMUTU - Rysuje od bieguna geometrycznie bliższego
+        # =========================================================================
+        N_x = -orient
+        S_x = orient
+
+        # Porównanie odległości na osi X - jeśli punkt jest po tej samej stronie
+        # zera co biegun, z tego bieguna zaczynamy rysować kąt.
+        if abs(X_Ah - N_x) <= abs(X_Ah - S_x):
+            start_pole_x = N_x
+        else:
+            start_pole_x = S_x
+
+        a1_A = np.arctan2(0 - cy_h, start_pole_x - 0)
+        a2_A = np.arctan2(Y_Ah - cy_h, X_Ah - 0)
+
+        while a2_A > a1_A + np.pi: a2_A -= 2 * np.pi
+        while a2_A < a1_A - np.pi: a2_A += 2 * np.pi
+        angles_A = np.linspace(a1_A, a2_A, 100)
+
+        X_A = 0 + R_h * np.cos(angles_A)
+        Y_A = cy_h + R_h * np.sin(angles_A)
+
+        self.ax.plot(X_A, Y_A, 'magenta', lw=2.5, zorder=4)
+        if len(X_A) > 1:
+            self.ax.annotate('', xy=(X_A[-1], Y_A[-1]), xytext=(X_A[-2], Y_A[-2]),
+                             arrowprops=dict(arrowstyle="-|>", color='magenta', lw=2, mutation_scale=15), zorder=5)
+            self.ax.text(X_A[50] + 0.04, Y_A[50] + 0.04, 'A', color='magenta', fontsize=12, fontweight='bold',
+                         zorder=12)
+
+        # Pozostałe elementy rysunku
+        if abs(X_s) < 1e-5:
+            X_h = np.zeros(100)
+            Y_h = np.linspace(Y_Ah, Y_s, 100)
+        else:
+            cx_v = (X_s * 2 + Y_s * 2 - 1) / (2 * X_s)
+            R_v = np.sqrt(cx_v ** 2 + 1)
+            a1_h = np.arctan2(Y_Ah - 0, X_Ah - cx_v)
+            a2_h = np.arctan2(Y_s - 0, X_s - cx_v)
+            while a2_h > a1_h + np.pi: a2_h -= 2 * np.pi
+            while a2_h < a1_h - np.pi: a2_h += 2 * np.pi
+            angles_h = np.linspace(a1_h, a2_h, 100)
+            X_h = cx_v + R_v * np.cos(angles_h)
+            Y_h = 0 + R_v * np.sin(angles_h)
+
+        if hc_rad > 0:
+            self.ax.plot(X_h, Y_h, 'red', lw=2.5, zorder=4)
+            if len(X_h) > 1:
+                self.ax.annotate('', xy=(X_h[-1], Y_h[-1]), xytext=(X_h[-2], Y_h[-2]),
+                                 arrowprops=dict(arrowstyle="-|>", color='red', lw=2, mutation_scale=15), zorder=5)
+                self.ax.text(X_h[50] + 0.06, Y_h[50] + 0.02, 'h', color='red', fontsize=12, fontweight='bold',
+                             zorder=12)
+
+        color_body = 'orange' if hc_rad >= 0 else 'gray'
+        self.ax.plot(X_s, Y_s, marker='o', color=color_body, markersize=10, markeredgecolor='black', zorder=10)
+        strona_lha = "W" if is_west else "E"
+        self.ax.text(X_s + 0.08, Y_s + 0.08, f'Ciało ({strona_lha})', color='black', fontsize=11, fontweight='bold',
+                     zorder=11)
+
+        self.ax.text(0, 1.05, 'Zn', color='black', fontsize=14, fontweight='bold', ha='center', va='bottom', zorder=13)
+        self.ax.text(0, -1.05, 'Na', color='black', fontsize=14, fontweight='bold', ha='center', va='top', zorder=13)
+
+        # Oryginalne, przywrócone etykiety biegunów
+        self.ax.text(-orient * 1.08, 0, 'N', color='blue', fontsize=12, fontweight='bold', ha='center', va='center')
+        self.ax.text(orient * 1.08, 0, 'S', color='blue', fontsize=12, fontweight='bold', ha='center', va='center')
+
+        self.ax.text(-orient * np.cos(fi_rad) * 1.08, np.sin(fi_rad) * 1.08, 'Pn', color='green', fontsize=12,
+                     fontweight='bold', ha='center', va='center')
+        self.ax.text(orient * np.cos(fi_rad) * 1.08, -np.sin(fi_rad) * 1.08, 'Ps', color='green', fontsize=12,
+                     fontweight='bold', ha='center', va='center')
+
+        self.ax.text(orient * np.sin(fi_rad) * 1.08, np.cos(fi_rad) * 1.08, 'Rg', color='purple', fontsize=12,
+                     fontweight='bold', ha='center', va='center')
+        self.ax.text(-orient * np.sin(fi_rad) * 1.08, -np.cos(fi_rad) * 1.08, 'Rd', color='purple', fontsize=12,
+                     fontweight='bold', ha='center', va='center')
+
+        self.ax.plot(0, -e_curve, marker='o', color='blue', markersize=5, zorder=8)
+        lbl_we = 'W' if is_west else 'E'
+        self.ax.text(0.05, -e_curve + 0.05, lbl_we, color='blue', fontsize=12, fontweight='bold', zorder=9)
+
+        self.ax.set_xlim(-1.25, 1.25)
+        self.ax.set_ylim(-1.25, 1.25)
+
+        dec_val_final = np.degrees(dec_rad)
+        dec_dir_final = "N" if dec_val_final >= 0 else "S"
+
+        if mode == 1:
+            t_val = lha_deg_final if is_west else 360.0 - lha_deg_final
+            t_dir = "W" if is_west else "E"
+            title_text = f'tλ: {t_val:.1f}° {t_dir}   |   h: {np.degrees(hc_rad):.1f}°   |   A: {np.degrees(zn_rad):.1f}°'
+        else:
+            title_text = f'Wynik -> δ: {abs(dec_val_final):.1f}° {dec_dir_final}   |   LHA: {lha_deg_final:.1f}°'
+
+        self.ax.set_title(title_text, fontsize=13, fontweight='bold', pad=15)
+        self.canvas.draw()
+
+
+if _name_ == "_main_":
+    root = tk.Tk()
+    app = CelestialSphereApp(root)
+    root.mainloop()
